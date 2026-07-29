@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>バス発車案内</title>
+  <!-- スマホでホーム画面に追加すると、ブラウザのアドレスバー無しで
+       ほぼ全画面のアプリのように起動できる(iOS/Android共通) -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="バス発車案内">
+  <meta name="theme-color" content="#000000">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #000000;
+      --frame: #9aa0a8;
+      --frame-dim: #4a4e54;
+      --green: #3ddc46;
+      --pink: #ff3da3;
+      --orange: #ffb121;
+      --cyan: #29e6ff;
+      --white: #ffffff;
+      --sub: #ffe27a;
+      --navy: #0b1f45;
+      /* 経由別配色。彩度と明度をはっきり分けて見分けやすくしている */
+      --via-direct: #4ee85a;
+      /* 緑 */
+      --via-airport: #ff4fc3;
+      /* マゼンタ */
+      --via-osatsu: #ffb121;
+      /* オレンジ */
+      --row-h: clamp(58px, 12vh, 150px);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000000;
+      color: var(--white);
+      font-family: "MS Gothic", "MS PGothic", "Yu Gothic Medium", "Meiryo", monospace;
+    }
+
+    #app {
+      width: 100vw;
+      height: 100vh;
+      height: 100dvh;
+      padding: clamp(6px, 1.2vh, 16px);
+      display: flex;
+    }
+
+    #board {
+      flex: 1;
+      background: var(--bg);
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      grid-template-areas: "head" "note" "table" "ticker";
+      border: 3px solid var(--frame);
+      border-radius: 4px;
+    }
+
+    /* ---- Via-only note (この停留所は特定の経由の便しか停まらない場合の注意書き) ---- */
+    #viaNote {
+      grid-area: note;
+      display: none;
+      padding: clamp(5px, 0.9vh, 10px) clamp(12px, 2vw, 28px);
+      font-size: clamp(13px, 1.6vw, 20px);
+      font-weight: 700;
+      border-bottom: 2px solid var(--frame-dim);
+      background: #0c0c0c;
+    }
+
+    #viaNote.show {
+      display: block;
+    }
+
+    #viaNote.direct {
+      color: var(--via-direct);
+      border-left: 6px solid var(--via-direct);
+    }
+
+    #viaNote.airport {
+      color: var(--via-airport);
+      border-left: 6px solid var(--via-airport);
+    }
+
+    #viaNote.osatsu {
+      color: var(--via-osatsu);
+      border-left: 6px solid var(--via-osatsu);
+    }
+
+    /* ---- Header (direction) ---- */
+    #head {
+      grid-area: head;
+      background: var(--navy);
+      border-bottom: 2px solid var(--frame-dim);
+      padding: clamp(6px, 1.2vh, 14px) clamp(12px, 2vw, 28px);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1em;
+    }
+
+    #head .ja {
+      font-size: clamp(20px, 3vw, 42px);
+      font-weight: 700;
+      color: var(--white);
+      letter-spacing: 0.03em;
+    }
+
+    #headRight {
+      flex: 0 0 auto;
+      text-align: right;
+    }
+
+    #stopTag {
+      font-size: clamp(12px, 1.3vw, 18px);
+      font-weight: 700;
+      color: var(--sub);
+      letter-spacing: 0.02em;
+      margin-bottom: 0.15em;
+    }
+
+    #clockDigital {
+      font-variant-numeric: tabular-nums;
+      font-size: clamp(22px, 3.2vw, 46px);
+      font-weight: 700;
+      color: var(--white);
+      letter-spacing: 0.03em;
+    }
+
+    /* ---- Table ---- */
+    #tablewrap {
+      grid-area: table;
+      min-height: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* 5列: 経由 / 発車時刻 / 行き先 / 到着時刻 / 運行会社
+     画面が狭いときは優先度の低い列(運行会社→到着時刻の順)を自動的に間引く */
+    :root {
+      --col-via: clamp(96px, 12vw, 170px);
+      --col-time: clamp(150px, 16vw, 230px);
+      --col-arr: clamp(120px, 13vw, 180px);
+      --col-comp: clamp(120px, 13vw, 180px);
+    }
+
+    .colhead,
+    .trow {
+      display: grid;
+      grid-template-columns: var(--col-via) var(--col-time) 1fr var(--col-arr) var(--col-comp);
+      gap: clamp(10px, 1.8vw, 26px);
+      align-items: center;
+    }
+
+    .colhead {
+      padding: clamp(7px, 1.1vh, 14px) clamp(14px, 2vw, 30px);
+      background: #1a1d24;
+      border-bottom: 2px solid var(--frame-dim);
+      color: var(--sub);
+      font-size: clamp(16px, 1.9vw, 24px);
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      flex: 0 0 auto;
+    }
+
+    .trow {
+      padding: clamp(8px, 1.3vh, 16px) clamp(14px, 2vw, 30px);
+      border-bottom: 1px solid var(--frame-dim);
+      background: #000000;
+    }
+
+    #rows .trow:nth-child(even) {
+      background: #1c2028;
+    }
+
+    .trow .via {
+      font-size: clamp(19px, 2.6vw, 34px);
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .trow .via.direct {
+      color: var(--via-direct);
+    }
+
+    .trow .via.airport {
+      color: var(--via-airport);
+    }
+
+    .trow .via.osatsu {
+      color: var(--via-osatsu);
+    }
+
+    .trow .timecol {
+      line-height: 1.1;
+      min-width: 0;
+    }
+
+    .trow .timecol .t {
+      font-variant-numeric: tabular-nums;
+      font-size: clamp(36px, 5.2vw, 72px);
+      font-weight: 700;
+      color: var(--cyan);
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: clip;
+    }
+
+    .trow .timecol .eta {
+      font-size: clamp(17px, 2.1vw, 26px);
+      font-weight: 700;
+      color: var(--orange);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: clip;
+    }
+
+    .trow.soon .timecol .t {
+      color: #ffffff;
+    }
+
+    .trow.soon .timecol .eta {
+      color: var(--pink);
+    }
+
+    .trow .dest {
+      font-size: clamp(24px, 3.4vw, 48px);
+      font-weight: 700;
+      color: var(--white);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
+    }
+
+    .trow .arrcol {
+      font-size: clamp(24px, 2.9vw, 40px);
+      font-weight: 700;
+      color: var(--white);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: clip;
+    }
+
+    .trow .compcol {
+      font-size: clamp(20px, 2.4vw, 32px);
+      font-weight: 700;
+      color: var(--sub);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* 画面幅が足りない時は優先度の低い列から自動的に非表示にする */
+    @media (max-width: 980px) {
+
+      .colhead,
+      .trow {
+        grid-template-columns: var(--col-via) var(--col-time) 1fr var(--col-arr);
+      }
+
+      .colhead .col-comp,
+      .trow .compcol {
+        display: none;
+      }
+    }
+
+    @media (max-width: 680px) {
+
+      .colhead,
+      .trow {
+        grid-template-columns: var(--col-via) var(--col-time) 1fr;
+      }
+
+      .colhead .col-arr,
+      .trow .arrcol {
+        display: none;
+      }
+    }
+
+    #rowProbe {
+      visibility: hidden;
+      position: absolute;
+      top: -9999px;
+      left: -9999px;
+    }
+
+    #empty {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--white);
+      font-size: clamp(18px, 2.4vw, 30px);
+      font-weight: 700;
+      text-align: center;
+      padding: 0 1em;
+    }
+
+    /* ---- Ticker ---- */
+    #ticker {
+      grid-area: ticker;
+      border-top: 2px solid var(--frame-dim);
+      overflow: hidden;
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+      height: clamp(26px, 4vh, 44px);
+    }
+
+    #ticker .track {
+      display: inline-block;
+      padding-left: 100%;
+      font-size: clamp(14px, 1.8vw, 22px);
+      font-weight: 700;
+      color: var(--green);
+      animation: scroll-left 45s linear infinite;
+    }
+
+    @keyframes scroll-left {
+      from {
+        transform: translateX(0);
+      }
+
+      to {
+        transform: translateX(-100%);
+      }
+    }
+
+    /* ---- Settings gear / fullscreen button (kiosk config, hidden by default) ---- */
+    #gear, #fsBtn {
+      position: fixed;
+      bottom: 8px;
+      width: 28px;
+      height: 28px;
+      color: var(--white);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 15px;
+      z-index: 20;
+      opacity: 0.12;
+    }
+    #gear { right: 8px; }
+    #fsBtn { right: 44px; }
+    #fsBtn:hover, #gear:hover { opacity: 0.85; }
+
+    #settings {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.85);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 30;
+    }
+
+    #settings.open {
+      display: flex;
+    }
+
+    #settings .panel {
+      background: #111111;
+      border: 1px solid #444;
+      border-radius: 6px;
+      padding: 22px;
+      width: min(480px, 90vw);
+      max-height: 85vh;
+      overflow: auto;
+      color: var(--white);
+      font-family: "Yu Gothic", "Meiryo", sans-serif;
+    }
+
+    #settings h2 {
+      margin-top: 0;
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    #settings label {
+      display: block;
+      margin: 12px 0 5px;
+      font-size: 13px;
+      color: #cfcfcf;
+    }
+
+    #settings select,
+    #settings input[type=number] {
+      width: 100%;
+      padding: 7px;
+      border-radius: 4px;
+      border: 1px solid #444;
+      background: #1a1a1a;
+      color: var(--white);
+      font-size: 14px;
+    }
+
+    #settings .radios label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 15px;
+      color: var(--white);
+      margin: 8px 0;
+    }
+
+    #settings .radios input {
+      width: auto;
+    }
+
+    #settings .actions {
+      margin-top: 18px;
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+
+    #settings button.primary,
+    #settings button.secondary {
+      padding: 8px 16px;
+      border-radius: 4px;
+      border: none;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    #settings button.primary {
+      background: var(--orange);
+      color: #201400;
+    }
+
+    #settings button.secondary {
+      background: transparent;
+      color: #cfcfcf;
+      border: 1px solid #444;
+    }
+
+    #settings p.hint {
+      font-size: 12px;
+      color: #cfcfcf;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app">
+    <div id="board">
+      <div id="head">
+        <div>
+          <div class="ja" id="headJa">大学行き</div>
+        </div>
+        <div id="headRight">
+          <div id="stopTag">設置場所：<span id="stopTagName">-</span></div>
+          <div id="clockDigital">--:--:--</div>
+        </div>
+      </div>
+
+      <div id="viaNote"></div>
+
+      <div id="tablewrap">
+        <div class="colhead" id="colhead">
+          <span>系統(経由)</span>
+          <span>発車時刻</span>
+          <span>行き先</span>
+          <span class="col-arr">到着時刻</span>
+          <span class="col-comp">運行会社</span>
+        </div>
+        <div class="rows" id="rows"></div>
+        <div id="empty" style="display:none;"></div>
+      </div>
+
+      <div id="ticker">
+        <div class="track" id="tickerTrack"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="trow" id="rowProbe">
+    <div class="via osatsu">空港経由</div>
+    <div class="timecol">
+      <div class="t">00:00</div>
+      <div class="eta">あと3時間59分</div>
+    </div>
+    <div class="dest">千歳駅着</div>
+    <div class="arrcol">00:00</div>
+    <div class="compcol">ウィング</div>
+  </div>
+
+  <div id="fsBtn" title="全画面表示">⛶</div>
+  <div id="gear" title="表示設定">⚙</div>
+  <div id="settings">
+    <div class="panel">
+      <h2>表示設定</h2>
+      <label for="sel-stop">表示するバス停</label>
+      <select id="sel-stop"></select>
+
+      <label>表示する方向</label>
+      <div class="radios">
+        <label><input type="radio" name="dir" id="dir-to_univ" value="to_univ"> 行き（大学方面）</label>
+        <label><input type="radio" name="dir" id="dir-to_city" value="to_city"> 帰り（千歳・長都方面）</label>
+      </div>
+
+      <label for="sel-limit">表示件数の上限（空欄で画面サイズに自動調整）</label>
+      <input type="number" id="sel-limit" min="1" max="30" placeholder="自動">
+
+      <p class="hint">設定はこの端末に保存されます。</p>
+      <div class="actions">
+        <button class="secondary" id="btn-cancel">閉じる</button>
+        <button class="primary" id="btn-save">保存して反映</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="timetable-data.js"></script>
+  <script src="bus-logic.js"></script>
+  <script>
+    (function () {
+      'use strict';
+      const STOPS = window.VIVIBUS_STOPS_ORDERED;
+      const TRIPS = window.VIVIBUS_TRIPS;
+      const Logic = window.VivibusLogic;
+      const STORAGE_KEY = 'bus-signage-config-v4';
+
+      const HEAD_LABELS = {
+        to_univ: { ja: '大学行き' },
+        to_city: { ja: '千歳・長都方面行き' },
+      };
+      // 方向を切り替えたとき、まだ手動でバス停を選び直していなければ
+      // 「行き=千歳駅発」「帰り=本部棟発」を既定値として自動的に合わせる
+      const DEFAULT_STOP_FOR_DIRECTION = { to_univ: 'chitose_st', to_city: 'univ_main' };
+
+      function readConfig() {
+        const params = new URLSearchParams(location.search);
+        let stored = {};
+        try { stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch (e) { }
+
+        const stop = params.get('stop') || stored.stop || 'univ_main';
+        const dirParam = params.get('dir');
+        let direction = dirParam ? dirParam.split(',')[0].trim() : (stored.direction || 'to_city');
+        if (direction !== 'to_univ' && direction !== 'to_city') direction = 'to_city';
+        const limitParam = params.get('limit');
+        const manualLimit = limitParam ? Number(limitParam) : (stored.manualLimit || null);
+
+        return { stop, direction, manualLimit };
+      }
+      function saveConfig(cfg) { localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg)); }
+
+      let config = readConfig();
+
+      function formatEta(mins) {
+        if (mins <= 0) return 'まもなく発車';
+        if (mins < 60) return 'あと' + mins + '分';
+        const h = Math.floor(mins / 60), m = mins % 60;
+        return 'あと' + h + '時間' + (m ? m + '分' : '');
+      }
+
+      const elHeadJa = document.getElementById('headJa');
+      const elStopTagName = document.getElementById('stopTagName');
+      const elTablewrap = document.getElementById('tablewrap');
+      const elColhead = document.getElementById('colhead');
+      const elRows = document.getElementById('rows');
+      const elEmpty = document.getElementById('empty');
+      const elProbe = document.getElementById('rowProbe');
+      const elTickerTrack = document.getElementById('tickerTrack');
+      const elClockDigital = document.getElementById('clockDigital');
+      const elViaNote = document.getElementById('viaNote');
+
+      const VIA_NOTE_TEXT = {
+        direct: 'このバス停は「直通」の便のみ停車します',
+        airport: 'このバス停は「空港経由」の便のみ停車します',
+        osatsu: 'このバス停は「長都(おさつ)方面」の便のみ停車します',
+      };
+      const VIA_LEGEND =
+        '直通：市役所前・朝日町経由(空港・長都方面は経由しません)　／　' +
+        '空港経由：新千歳空港(国内線・国際線)を経由します　／　' +
+        '長都方面：長都駅東口・北陽高校前を経由します';
+
+      function stopName(id) {
+        const s = STOPS.find(s => s.id === id);
+        return s ? s.name : id;
+      }
+
+      // 「公立千歳科学技術大学」のような長い正式名称は使わず、
+      // 実際の到着停留所名(本部棟／研究棟など)を短く表示する
+      function shortDestination(r) {
+        if (r.direction !== 'to_univ') return r.destination;
+        const id = Logic.getDestinationStopId(r.trip);
+        return stopName(id).replace(/^科技大/, '') || r.destination;
+      }
+
+      // 停車順ティッカー: 行き(大学方面)は STOPS_ORDERED の並びそのまま。
+      // 帰り(千歳・長都方面)は単純な逆順ではなく、実際の運行順(空港ターミナル内の
+      // 通過順が行き/帰りで同じにならない箇所がある)に合わせた並びを個別に定義する。
+      const TICKER_TO_UNIV = STOPS_TICKER_ORDER();
+      const TICKER_TO_CITY = [
+        'rapidas', 'univ_main', 'univ_research', 'office_arcadia',
+        'airport_dom28', 'airport_dom1', 'airport_intl', 'air_cargo', 'minami_chitose',
+        'asahi7', 'asahi4', 'city_hall', 'koizumi_clinic', 'mori_moto', 'chitose_st',
+        'hokuyou_hs', 'osatsu_st',
+      ];
+      function STOPS_TICKER_ORDER() { return STOPS.map(s => s.id); }
+
+      function renderTicker() {
+        const order = config.direction === 'to_city' ? TICKER_TO_CITY : TICKER_TO_UNIV;
+        elTickerTrack.textContent = VIA_LEGEND + '　｜　停車順　' + order.map(stopName).join('　・　');
+      }
+
+      function renderViaNote() {
+        const vias = Logic.getStopVias(TRIPS, config.stop, config.direction);
+        if (vias.size === 1) {
+          const only = [...vias][0];
+          elViaNote.textContent = VIA_NOTE_TEXT[only] || '';
+          elViaNote.className = 'show ' + only;
+        } else {
+          elViaNote.textContent = '';
+          elViaNote.className = '';
+        }
+      }
+
+      function updateClock(now) {
+        const hh = String(now.getHours()).padStart(2, '0');
+        const mm = String(now.getMinutes()).padStart(2, '0');
+        const ss = String(now.getSeconds()).padStart(2, '0');
+        elClockDigital.textContent = hh + ':' + mm + ':' + ss;
+      }
+
+      function computeFitCount() {
+        const rowH = elProbe.getBoundingClientRect().height || 60;
+        const headH = elColhead.getBoundingClientRect().height;
+        const availH = elTablewrap.getBoundingClientRect().height - headH;
+        return Math.max(1, Math.floor(availH / rowH));
+      }
+
+      function currentLimit() {
+        const fit = computeFitCount();
+        if (config.manualLimit && config.manualLimit > 0) return Math.min(config.manualLimit, fit);
+        return fit;
+      }
+
+      function updateBoard() {
+        const label = HEAD_LABELS[config.direction];
+        elHeadJa.textContent = label.ja;
+        elStopTagName.textContent = stopName(config.stop);
+        renderTicker();
+        renderViaNote();
+
+        const limit = currentLimit();
+        const results = Logic.computeUpcoming(TRIPS, config.stop, [config.direction], new Date(), { limit, graceMin: 1 });
+
+        elRows.innerHTML = '';
+        if (results.length === 0) {
+          elEmpty.style.display = 'flex';
+          elEmpty.textContent = '本日の運行は終了しました、または該当する便がありません';
+          return;
+        }
+        elEmpty.style.display = 'none';
+
+        for (const r of results) {
+          const row = document.createElement('div');
+          row.className = 'trow' + (r.minutesUntil <= 5 ? ' soon' : '');
+
+          const viaEl = document.createElement('div');
+          viaEl.className = 'via ' + r.via;
+          viaEl.textContent = r.viaLabel;
+
+          const timeEl = document.createElement('div');
+          timeEl.className = 'timecol';
+          const t = document.createElement('div');
+          t.className = 't';
+          t.textContent = r.time;
+          const eta = document.createElement('div');
+          eta.className = 'eta';
+          eta.textContent = formatEta(r.minutesUntil);
+          timeEl.appendChild(t);
+          timeEl.appendChild(eta);
+
+          const dest = document.createElement('div');
+          dest.className = 'dest';
+          dest.textContent = shortDestination(r) + '着';
+
+          const arrEl = document.createElement('div');
+          arrEl.className = 'arrcol';
+          arrEl.textContent = r.arrivalTime || '';
+
+          const compEl = document.createElement('div');
+          compEl.className = 'compcol';
+          compEl.textContent = r.companyLabel;
+
+          row.appendChild(viaEl);
+          row.appendChild(timeEl);
+          row.appendChild(dest);
+          row.appendChild(arrEl);
+          row.appendChild(compEl);
+          elRows.appendChild(row);
+        }
+      }
+
+      let lastMinute = -1;
+      function loop() {
+        const now = new Date();
+        updateClock(now);
+        if (now.getMinutes() !== lastMinute) {
+          lastMinute = now.getMinutes();
+          updateBoard();
+        }
+      }
+      updateBoard();
+      loop();
+      setInterval(loop, 1000);
+
+      let resizeTimer;
+      window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(updateBoard, 150);
+      });
+      window.addEventListener('orientationchange', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(updateBoard, 300);
+      });
+
+      // キオスク運用向け: 長時間表示での不具合を避けるため定期リロード
+      setTimeout(() => location.reload(), 6 * 60 * 60 * 1000);
+
+      // ---- 設定パネル(バス停・方向・件数上限) ----
+      const gear = document.getElementById('gear');
+      const settings = document.getElementById('settings');
+      const selStop = document.getElementById('sel-stop');
+      const selLimit = document.getElementById('sel-limit');
+      const dirUniv = document.getElementById('dir-to_univ');
+      const dirCity = document.getElementById('dir-to_city');
+
+      STOPS.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = s.name;
+        selStop.appendChild(opt);
+      });
+
+      function openSettings() {
+        selStop.value = config.stop;
+        selLimit.value = config.manualLimit || '';
+        dirUniv.checked = config.direction === 'to_univ';
+        dirCity.checked = config.direction === 'to_city';
+        settings.classList.add('open');
+      }
+      function closeSettings() { settings.classList.remove('open'); }
+
+      // 行き/帰りを切り替えると、対応する既定のバス停(行き=千歳駅前／帰り=科技大本部棟)を
+      // 自動で選択する。手動で別のバス停に変えたい場合は、この後プルダウンから選び直せる。
+      function onDirectionChange() {
+        const dir = dirUniv.checked ? 'to_univ' : 'to_city';
+        selStop.value = DEFAULT_STOP_FOR_DIRECTION[dir];
+      }
+      dirUniv.addEventListener('change', onDirectionChange);
+      dirCity.addEventListener('change', onDirectionChange);
+
+      // ---- 全画面表示ボタン ----
+      // Android/PCのブラウザは Fullscreen API でその場で全画面にできる。
+      // iPhoneのSafariはこのAPIに対応していないため、その場合はホーム画面に
+      // 追加して起動する方法を案内する(manifest.json 側で standalone 表示になる)。
+      const fsBtn = document.getElementById('fsBtn');
+      function isFullscreen() {
+        return !!(document.fullscreenElement || document.webkitFullscreenElement);
+      }
+      function updateFsBtn() {
+        fsBtn.title = isFullscreen() ? '全画面を解除' : '全画面表示';
+      }
+      fsBtn.addEventListener('click', () => {
+        const el = document.documentElement;
+        if (isFullscreen()) {
+          if (document.exitFullscreen) document.exitFullscreen();
+          else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+          return;
+        }
+        if (el.requestFullscreen) {
+          el.requestFullscreen().catch(() => {
+            alert('この端末では全画面表示に対応していません。\niPhoneの場合は、共有ボタン→「ホーム画面に追加」から起動すると、アドレスバーの無い全画面に近い表示になります。');
+          });
+        } else if (el.webkitRequestFullscreen) {
+          el.webkitRequestFullscreen();
+        } else {
+          alert('この端末では全画面表示に対応していません。\niPhoneの場合は、共有ボタン→「ホーム画面に追加」から起動すると、アドレスバーの無い全画面に近い表示になります。');
+        }
+      });
+      document.addEventListener('fullscreenchange', updateFsBtn);
+      document.addEventListener('webkitfullscreenchange', updateFsBtn);
+
+      gear.addEventListener('click', openSettings);
+      document.getElementById('btn-cancel').addEventListener('click', closeSettings);
+      document.getElementById('btn-save').addEventListener('click', () => {
+        const limitVal = Number(selLimit.value);
+        config = {
+          ...config,
+          stop: selStop.value,
+          direction: dirUniv.checked ? 'to_univ' : 'to_city',
+          manualLimit: limitVal > 0 ? limitVal : null,
+        };
+        saveConfig(config);
+        closeSettings();
+        updateBoard();
+      });
+      settings.addEventListener('click', (e) => { if (e.target === settings) closeSettings(); });
+    })();
+  </script>
+</body>
+
+</html>

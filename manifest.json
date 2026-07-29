@@ -1,0 +1,9 @@
+{
+  "name": "バス発車案内",
+  "short_name": "バス案内",
+  "start_url": "./index.html",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#000000",
+  "theme_color": "#000000"
+}
