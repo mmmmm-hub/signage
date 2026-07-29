@@ -62,12 +62,53 @@
 
     #board {
       flex: 1;
+      min-width: 0;
       background: var(--bg);
       display: grid;
       grid-template-rows: auto auto 1fr auto;
       grid-template-areas: "head" "note" "table" "ticker";
       border: 3px solid var(--frame);
       border-radius: 4px;
+    }
+
+    /* ---- 広告枠(アイコン・QR・「ビビバス」): 右端に常時表示 ---- */
+    #adPanel {
+      flex: 0 0 clamp(100px, 12vw, 170px);
+      margin-left: clamp(6px, 1.2vh, 16px);
+      background: var(--bg);
+      border: 3px solid var(--frame);
+      border-radius: 4px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: clamp(8px, 1.4vh, 18px);
+      padding: clamp(8px, 1.6vh, 20px) clamp(6px, 1vw, 14px);
+    }
+    #adPanel.hidden { display: none; }
+    #adPanel .ad-icon {
+      width: clamp(40px, 5vw, 64px);
+      height: auto;
+      border-radius: 20%;
+    }
+    #adPanel .ad-qr {
+      width: 100%;
+      min-width: 80px;
+      max-width: 160px;
+      height: auto;
+      border-radius: 4px;
+      background: #fff;
+      padding: 2px;
+    }
+    #adPanel .ad-caption {
+      font-size: clamp(15px, 2vw, 22px);
+      font-weight: 700;
+      color: var(--sub);
+      text-align: center;
+      line-height: 1.3;
+    }
+    @media (max-width: 560px) {
+      #adPanel { display: none; }
     }
 
     /* ---- Via-only note (この停留所は特定の経由の便しか停まらない場合の注意書き) ---- */
@@ -493,6 +534,12 @@
         <div class="track" id="tickerTrack"></div>
       </div>
     </div>
+
+    <div id="adPanel">
+      <img class="ad-icon" src="vivibus-icon.png" alt="">
+      <img class="ad-qr" src="qr.png" alt="QRコード">
+      <div class="ad-caption">スマホで<br>ビビバス</div>
+    </div>
   </div>
 
   <div class="trow" id="rowProbe">
@@ -522,6 +569,12 @@
 
       <label for="sel-limit">表示件数の上限（空欄で画面サイズに自動調整）</label>
       <input type="number" id="sel-limit" min="1" max="30" placeholder="自動">
+
+      <label>ビビバス広告の表示</label>
+      <div class="radios">
+        <label><input type="radio" name="ad" id="ad-none" value="none"> 表示しない</label>
+        <label><input type="radio" name="ad" id="ad-always" value="always"> 表示する（右端に表示）</label>
+      </div>
 
       <p class="hint">設定はこの端末に保存されます。</p>
       <div class="actions">
@@ -560,8 +613,11 @@
         if (direction !== 'to_univ' && direction !== 'to_city') direction = 'to_city';
         const limitParam = params.get('limit');
         const manualLimit = limitParam ? Number(limitParam) : (stored.manualLimit || null);
+        const adParam = params.get('ad');
+        let adMode = adParam || stored.adMode || 'always';
+        if (['none', 'always'].indexOf(adMode) === -1) adMode = 'always';
 
-        return { stop, direction, manualLimit };
+        return { stop, direction, manualLimit, adMode };
       }
       function saveConfig(cfg) { localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg)); }
 
@@ -584,6 +640,12 @@
       const elTickerTrack = document.getElementById('tickerTrack');
       const elClockDigital = document.getElementById('clockDigital');
       const elViaNote = document.getElementById('viaNote');
+      const elAdPanel = document.getElementById('adPanel');
+
+      // ビビバス広告: none=非表示 / always=右端に常時表示
+      function applyAdMode() {
+        elAdPanel.classList.toggle('hidden', config.adMode !== 'always');
+      }
 
       const VIA_NOTE_TEXT = {
         direct: 'このバス停は「直通」の便のみ停車します',
@@ -725,6 +787,7 @@
         }
       }
       updateBoard();
+      applyAdMode();
       loop();
       setInterval(loop, 1000);
 
@@ -748,6 +811,8 @@
       const selLimit = document.getElementById('sel-limit');
       const dirUniv = document.getElementById('dir-to_univ');
       const dirCity = document.getElementById('dir-to_city');
+      const adNone = document.getElementById('ad-none');
+      const adAlways = document.getElementById('ad-always');
 
       STOPS.forEach(s => {
         const opt = document.createElement('option');
@@ -761,6 +826,8 @@
         selLimit.value = config.manualLimit || '';
         dirUniv.checked = config.direction === 'to_univ';
         dirCity.checked = config.direction === 'to_city';
+        adNone.checked = config.adMode === 'none';
+        adAlways.checked = config.adMode === 'always';
         settings.classList.add('open');
       }
       function closeSettings() { settings.classList.remove('open'); }
@@ -814,10 +881,12 @@
           stop: selStop.value,
           direction: dirUniv.checked ? 'to_univ' : 'to_city',
           manualLimit: limitVal > 0 ? limitVal : null,
+          adMode: adNone.checked ? 'none' : 'always',
         };
         saveConfig(config);
         closeSettings();
         updateBoard();
+        applyAdMode();
       });
       settings.addEventListener('click', (e) => { if (e.target === settings) closeSettings(); });
     })();
