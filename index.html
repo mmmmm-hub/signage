@@ -71,7 +71,10 @@
       border-radius: 4px;
     }
 
-    /* ---- 広告枠(アイコン・QR・「ビビバス」): 右端に常時表示 ---- */
+    /* ---- 広告枠(アイコン・QR・「ビビバス」): 右端に常時表示 ----
+       スマホを横向きで全画面にすると、ノッチ/Dynamic Islandが右端(この枠の
+       上側)にかかることがあるため、中央寄せではなく下寄せにして避けている。
+       safe-area-inset も加味して、ノッチ側に余分な余白を足している。 */
     #adPanel {
       flex: 0 0 clamp(100px, 12vw, 170px);
       margin-left: clamp(6px, 1.2vh, 16px);
@@ -81,9 +84,12 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
+      justify-content: flex-end;
       gap: clamp(8px, 1.4vh, 18px);
-      padding: clamp(8px, 1.6vh, 20px) clamp(6px, 1vw, 14px);
+      padding-top: max(clamp(8px, 1.6vh, 20px), env(safe-area-inset-top, 0px));
+      padding-right: max(clamp(6px, 1vw, 14px), env(safe-area-inset-right, 0px));
+      padding-bottom: clamp(8px, 1.6vh, 20px);
+      padding-left: clamp(6px, 1vw, 14px);
     }
     #adPanel.hidden { display: none; }
     #adPanel .ad-icon {
